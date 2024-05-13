@@ -1,5 +1,6 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
+# ---------------------- 进行网络的运行时间的测试 ----------------------
 from time import time
 import numpy as np
 import torch.cuda
