@@ -154,13 +154,10 @@ def calculate_au_pro_au_roc(gt_filenames,
             ground_truth.append(np.zeros(prediction.shape))
 
     # Compute the PRO curve.
-    pro_curve = compute_pro(
-        anomaly_maps=predictions,
-        ground_truth_maps=ground_truth)
+    pro_curve = compute_pro(anomaly_maps=predictions, ground_truth_maps=ground_truth)
 
     # Compute the area under the PRO curve.
-    au_pro = util.trapezoid(
-        pro_curve[0], pro_curve[1], x_max=integration_limit)
+    au_pro = util.trapezoid(pro_curve[0], pro_curve[1], x_max=integration_limit)
     au_pro /= integration_limit
     print(f"AU-PRO (FPR limit: {integration_limit}): {au_pro}")
 
@@ -204,18 +201,12 @@ def main():
 
         # Parse the filenames of all ground truth and corresponding anomaly
         # images for this object.
-        gt_filenames, prediction_filenames = \
-            parse_dataset_files(
-                object_name=obj,
-                dataset_base_dir=args.dataset_base_dir,
-                anomaly_maps_dir=args.anomaly_maps_dir)
+        gt_filenames, prediction_filenames = parse_dataset_files(object_name=obj,
+                                                                 dataset_base_dir=args.dataset_base_dir,
+                                                                 anomaly_maps_dir=args.anomaly_maps_dir)
 
         # Calculate the PRO and ROC curves.
-        au_pro, au_roc, pro_curve, roc_curve = \
-            calculate_au_pro_au_roc(
-                gt_filenames,
-                prediction_filenames,
-                args.pro_integration_limit)
+        au_pro, au_roc, pro_curve, roc_curve = calculate_au_pro_au_roc(gt_filenames, prediction_filenames, args.pro_integration_limit)
 
         evaluation_dict[obj]['au_pro'] = au_pro
         evaluation_dict[obj]['classification_au_roc'] = au_roc

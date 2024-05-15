@@ -9,41 +9,35 @@ import argparse
 import itertools
 import os
 import random
+import time
 from tqdm import tqdm
-from common import get_autoencoder, get_pdn_small, get_pdn_medium, \
-    ImageFolderWithoutTarget, ImageFolderWithPath, InfiniteDataloader
+from common import get_autoencoder, get_pdn_small, get_pdn_medium, ImageFolderWithoutTarget, ImageFolderWithPath, InfiniteDataloader
 from sklearn.metrics import roc_auc_score
+import cv2
+
+mvtecAD = ['bottle', 'cable', 'capsule', 'carpet', 'grid', 'hazelnut', 'leather', 'metal_nut', 'pill', 'screw', 'tile', 'toothbrush', 'transistor', 'wood', 'zipper']
+mvtecLocoAD = ['breakfast_box', 'juice_bottle', 'pushpins', 'screw_bag', 'splicing_connectors']
+MuraAD = ['MonoLocalAD']
 
 def get_argparse():
     parser = argparse.ArgumentParser()
-    parser.add_argument('-d', '--dataset', default='mvtec_ad',
-                        choices=['mvtec_ad', 'mvtec_loco'])
-    parser.add_argument('-s', '--subdataset', default='bottle',
-                        help='One of 15 sub-datasets of Mvtec AD or 5' +
-                             'sub-datasets of Mvtec LOCO')
-    parser.add_argument('-o', '--output_dir', default='output/1')
-    parser.add_argument('-m', '--model_size', default='small',
-                        choices=['small', 'medium'])
-    parser.add_argument('-w', '--weights', default='models/teacher_small.pth')
-    parser.add_argument('-i', '--imagenet_train_path',
-                        default='none',
-                        help='Set to "none" to disable ImageNet' +
-                             'pretraining penalty. Or see README.md to' +
-                             'download ImageNet and set to ImageNet path')
-    parser.add_argument('-a', '--mvtec_ad_path',
-                        default='/raid/zhangss/dataset/ADetection/mvtecAD/',
-                        help='Downloaded Mvtec AD dataset')
-    parser.add_argument('-b', '--mvtec_loco_path',
-                        default='./mvtec_loco_anomaly_detection',
-                        help='Downloaded Mvtec LOCO dataset')
-    parser.add_argument('-t', '--train_steps', type=int, default=70000)
+    parser.add_argument('-d', '--dataset',    default='mura_ad', choices=['mvtec_ad', 'mvtec_loco', 'mura_ad'])
+    parser.add_argument('-s', '--subdataset', default=['all'], help='One of 15 sub-datasets of Mvtec AD or 5 sub-datasets of Mvtec LOCO or all')
+    parser.add_argument('-o', '--output_dir', default='output')
+    parser.add_argument('-m', '--model_size', default='small', choices=['small', 'medium'])
+    parser.add_argument('-w', '--weights',    default='ckpts/teacher_small.pth')
+    parser.add_argument('-i', '--imagenet_train_path', default='none',
+                        help='Set to "none" to disable ImageNet pretraining penalty. Or see README.md to download ImageNet and set to ImageNet path')
+    
+    parser.add_argument('-a', '--ad_path',      default='./data/ADetection/', help='AD dataset')
+    parser.add_argument('-t', '--train_steps',  default=10000,     type=int, ) # 70000
     return parser.parse_args()
 
 # constants
-seed = 42
+seed   = 42
 on_gpu = torch.cuda.is_available()
 out_channels = 384
-image_size = 256
+image_size   = 256
 
 # data loading
 default_transform = transforms.Compose([
@@ -61,35 +55,21 @@ def train_transform(image):
     return default_transform(image), default_transform(transform_ae(image))
 
 # ---------------------
-def main():
-    torch.manual_seed(seed)
-    np.random.seed(seed)
-    random.seed(seed)
-
-    config = get_argparse()
-
-    if config.dataset == 'mvtec_ad':
-        dataset_path = config.mvtec_ad_path
-    elif config.dataset == 'mvtec_loco':
-        dataset_path = config.mvtec_loco_path
-    else:
-        raise Exception('Unknown config.dataset')
-
-    pretrain_penalty = True
-    if config.imagenet_train_path == 'none':
-        pretrain_penalty = False
+def run_train(config, dataset_path, pretrain_penalty=False):
+    # 当前的日期
+    datestr = time.strftime("%Y%m%d", time.localtime())
 
     # create output dir
-    train_output_dir = os.path.join(config.output_dir, 'trainings',    config.dataset, config.subdataset)
-    test_output_dir  = os.path.join(config.output_dir, 'anomaly_maps', config.dataset, config.subdataset, 'test')
-    os.makedirs(train_output_dir)
-    os.makedirs(test_output_dir)
+    train_output_dir = os.path.join(config.output_dir, datestr, 'trainings',    config.dataset, config.subdataset)
+    test_output_dir  = os.path.join(config.output_dir, datestr, 'anomaly_maps', config.dataset, config.subdataset, 'test')
+    os.makedirs(train_output_dir, exist_ok=True)
+    os.makedirs(test_output_dir, exist_ok=True)
 
     # load data
     full_train_set = ImageFolderWithoutTarget(os.path.join(dataset_path, config.subdataset, 'train'), 
                                               transform=transforms.Lambda(train_transform))
     test_set       = ImageFolderWithPath(os.path.join(dataset_path, config.subdataset, 'test'))
-    if config.dataset == 'mvtec_ad':
+    if config.dataset == 'mvtec_ad' or config.dataset == 'mura_ad':
         # mvtec dataset paper recommend 10% validation set
         train_size      = int(0.9 * len(full_train_set))
         validation_size = len(full_train_set) - train_size
@@ -190,12 +170,13 @@ def main():
         if iteration % 10 == 0:
             tqdm_obj.set_description("Current loss: {:.4f}  ".format(loss_total.item()))
 
-        if iteration % 1000 == 0:
+        if iteration % 500 == 0:
             torch.save(teacher, os.path.join(train_output_dir,'teacher_tmp.pth'))
             torch.save(student, os.path.join(train_output_dir,'student_tmp.pth'))
             torch.save(autoencoder, os.path.join(train_output_dir, 'autoencoder_tmp.pth'))
 
-        if iteration % 10000 == 0 and iteration > 0:
+        # 70000 -> 10000   10000->2000
+        if iteration % 1000 == 0 and iteration > 0:
             # run intermediate evaluation
             teacher.eval()
             student.eval()
@@ -217,6 +198,10 @@ def main():
             student.train()
             autoencoder.train()
 
+            if auc > 99.99:
+                print('Early stopping because auc is 100%')
+                break
+
     teacher.eval()
     student.eval()
     autoencoder.eval()
@@ -237,16 +222,45 @@ def main():
     print('Final image auc: {:.4f}'.format(auc))
 
 # ---------------------
+def main():
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+
+    config = get_argparse()
+
+    if config.dataset == 'mvtec_ad':
+        subdatasets  = mvtecAD if config.subdataset[0] in ['all'] else config.subdataset
+        dataset_path = os.path.join(config.ad_path, "mvtec")
+    elif config.dataset == 'mvtec_loco':
+        subdatasets  = mvtecLocoAD if config.subdataset[0] in ['all']  else config.subdataset
+        dataset_path = os.path.join(config.ad_path, "mvtecloco")
+    elif config.dataset == 'mura_ad':
+        subdatasets  = MuraAD if config.subdataset[0] in ['all']  else config.subdataset
+        dataset_path = os.path.join(config.ad_path, "MuraAD")
+    else:
+        raise Exception('Unknown config.dataset')
+
+    pretrain_penalty = False if config.imagenet_train_path == 'none' else True
+    for subdataset in subdatasets:
+        assert subdataset in mvtecAD + mvtecLocoAD + MuraAD, 'Unknown subdataset'
+        config.subdataset = subdataset
+        print('Training on', config.subdataset)
+        run_train(config, dataset_path, pretrain_penalty)
+    
+# ---------------------
 def test(test_set, teacher, student, autoencoder, teacher_mean, teacher_std,
          q_st_start, q_st_end, q_ae_start, q_ae_end, test_output_dir=None,
          desc='Running inference'):
     y_true  = []
     y_score = []
     for image, target, path in tqdm(test_set, desc=desc):
-        orig_width = image.width
-        orig_height = image.height
-        image = default_transform(image)
-        image = image[None]
+        #orig_width  = image.width
+        #orig_height = image.height
+        image       = default_transform(image)
+        orig_width  = image.shape[2]
+        orig_height = image.shape[1]
+        image       = image[None]
         if on_gpu:
             image = image.cuda()
         map_combined, map_st, map_ae = predict(image=image, teacher=teacher, student=student,
@@ -256,15 +270,32 @@ def test(test_set, teacher, student, autoencoder, teacher_mean, teacher_std,
         
         map_combined = torch.nn.functional.pad(map_combined, (4, 4, 4, 4))
         map_combined = torch.nn.functional.interpolate(map_combined, (orig_height, orig_width), mode='bilinear')
-        map_combined = map_combined[0, 0].cpu().numpy()
+        map_combined = np.transpose(map_combined[0, 0].cpu().numpy())
+        map_save     = cv2.applyColorMap(np.uint8((map_combined + 1) * 128), cv2.COLORMAP_JET)
+
+        map_st       = torch.nn.functional.pad(map_st, (4, 4, 4, 4))
+        map_st       = torch.nn.functional.interpolate(map_st, (orig_height, orig_width), mode='bilinear')
+        map_st       = np.transpose(map_st[0, 0].cpu().numpy())
+        map_st       = cv2.applyColorMap(np.uint8((map_st + 1) * 128), cv2.COLORMAP_JET)
+
+        map_ae       = torch.nn.functional.pad(map_ae, (4, 4, 4, 4))
+        map_ae       = torch.nn.functional.interpolate(map_ae, (orig_height, orig_width), mode='bilinear')
+        map_ae       = np.transpose(map_ae[0, 0].cpu().numpy())
+        map_ae       = cv2.applyColorMap(np.uint8((map_ae + 1) * 128), cv2.COLORMAP_JET)
+
+        image        = image[0].cpu().numpy()
+        mean         = np.array([0.485, 0.456, 0.406]).reshape((3, 1, 1))  
+        std          = np.array([0.229, 0.224, 0.225]).reshape((3, 1, 1))  
+        image        = np.transpose(np.uint8((image * std + mean) *255))
+
+        image_save   = np.concatenate([image, map_save, map_st, map_ae], axis=1) 
 
         defect_class = os.path.basename(os.path.dirname(path))
         if test_output_dir is not None:
+            os.makedirs(os.path.join(test_output_dir, defect_class), exist_ok=True)
             img_nm = os.path.split(path)[1].split('.')[0]
-            if not os.path.exists(os.path.join(test_output_dir, defect_class)):
-                os.makedirs(os.path.join(test_output_dir, defect_class))
-            file = os.path.join(test_output_dir, defect_class, img_nm + '.tiff')
-            tifffile.imwrite(file, map_combined)
+            file   = os.path.join(test_output_dir, defect_class, img_nm + '.tiff')
+            tifffile.imwrite(file, image_save)
 
         y_true_image  = 0 if defect_class == 'good' else 1
         y_score_image = np.max(map_combined)
