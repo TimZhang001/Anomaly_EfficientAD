@@ -11,13 +11,14 @@ import os
 import random
 import time
 from tqdm import tqdm
-from common import get_autoencoder, get_pdn_small, get_pdn_medium, ImageFolderWithoutTarget, ImageFolderWithPath, InfiniteDataloader
+from common.common import get_autoencoder, get_pdn_small, get_pdn_medium, ImageFolderWithoutTarget, ImageFolderWithPath, InfiniteDataloader
 from sklearn.metrics import roc_auc_score
 import cv2
 
-mvtecAD = ['bottle', 'cable', 'capsule', 'carpet', 'grid', 'hazelnut', 'leather', 'metal_nut', 'pill', 'screw', 'tile', 'toothbrush', 'transistor', 'wood', 'zipper']
+
+mvtecAD     = ['bottle', 'cable', 'capsule', 'carpet', 'grid', 'hazelnut', 'leather', 'metal_nut', 'pill', 'screw', 'tile', 'toothbrush', 'transistor', 'wood', 'zipper']
 mvtecLocoAD = ['breakfast_box', 'juice_bottle', 'pushpins', 'screw_bag', 'splicing_connectors']
-MuraAD = ['MonoLocalAD']
+MuraAD      = ['MonoLocalAD']
 
 def get_argparse():
     parser = argparse.ArgumentParser()

@@ -1,7 +1,9 @@
 import torch.nn as nn
-import torch
 import torch.nn.functional as F
-from wide_resnet import imagenet_norm_batch, weights_init
+import sys
+sys.path.append('/home/zhangss/Tim.Zhang/ADetection/Anomaly_EfficientAD')
+
+from models.wide_resnet import imagenet_norm_batch
 from torchsummary import summary
 
 class EncConv(nn.Module):
@@ -75,7 +77,7 @@ class DecConv(nn.Module):
         # Bilinear-7 Resizes the 128×128 input features maps to 64×64
         # DecConv-7 1×1 3×3 64 1 ReLU
         # DecConv-8 1×1 3×3 384 1 -
-        self.is_bn = is_bn
+        self.is_bn   = is_bn
         self.deconv1 = nn.Conv2d(64, 64, kernel_size=4, stride=1, padding=2)
         self.deconv2 = nn.Conv2d(64, 64, kernel_size=4, stride=1, padding=2)
         self.deconv3 = nn.Conv2d(64, 64, kernel_size=4, stride=1, padding=2)
