@@ -182,7 +182,10 @@ class Engine(object):
 
                 # 计算map参数
                 self.qa_st,self.qb_st,self.qa_ae,self.qb_ae = self.map_norm_quantiles(quantile_dl)
-                quantiles = {'qa_st':self.qa_st,'qb_st':self.qb_st,'qa_ae':self.qa_ae,'qb_ae':self.qb_ae}
+                quantiles = {'qa_st':self.qa_st.detach(),
+                             'qb_st':self.qb_st.detach(),
+                             'qa_ae':self.qa_ae.detach(),
+                             'qb_ae':self.qb_ae.detach()}
 
                 # save model and map 参数
                 torch.save(quantiles, '{}/{}_quantiles_last.pth'.format(self.ckpt_dir,self.category))
@@ -192,7 +195,9 @@ class Engine(object):
                     if auroc > best_auroc:
                         best_loss  = loss_total
                         best_auroc = auroc
-                        print('saving model in {} at auroc:{:.4f}'.format(self.ckpt_dir, auroc))                 
+                        print('saving model in {} at auroc:{:.4f}'.format(self.ckpt_dir, auroc))    
+
+                        # 加载必要的参数        
                         torch.save(self.model, '{}/{}_best.pth'.format(self.ckpt_dir,self.category))  
 
             if best_auroc > 0.995:

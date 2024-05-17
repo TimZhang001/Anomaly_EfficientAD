@@ -13,7 +13,7 @@ from torchvision import transforms
 
 class EfficientADNet(nn.Module):
     def __init__(self, config):
-        super().__init__()
+        super(EfficientADNet, self).__init__()
         self.config       = config
         self.ckpt_dir     = config['ckpt_dir']
         self.category     = config['category']
@@ -22,9 +22,8 @@ class EfficientADNet(nn.Module):
         self.with_bn      = str(self.with_bn).lower()=='true'
         self.channel_size = config['Model']['channel_size']
 
-        self.input_size = config['Model']['input_size']
-        self.score_in_mid_size=int(0.9*self.input_size)
-
+        self.input_size   = config['Model']['input_size']
+        self.valid_size   = int(0.9*self.input_size)
 
         self.teacher_mean = None
         self.teacher_std  = None
@@ -55,15 +54,6 @@ class EfficientADNet(nn.Module):
         self.teacher_std  = mean_std['std']
         print('load channel mean and std from {}'.format(teacher_std_ckpt))
 
-    def load_quantile(self):
-        quantile_ckpt = '{}/{}_quantiles_last.pth'.format(self.ckpt_dir,self.category)
-        assert os.path.exists(quantile_ckpt), 'quantile file not found'
-        quantiles     = torch.load(quantile_ckpt)
-        self.qa_st     = quantiles['qa_st']
-        self.qb_st     = quantiles['qb_st']
-        self.qa_ae     = quantiles['qa_ae']
-        self.qb_ae     = quantiles['qb_ae']
-
     def load_pretrain_teacher(self):
         ckpt_path = '{}/best_teacher.pth'.format(self.ckpt_dir)
         self.te_model.load_state_dict(torch.load(ckpt_path))
@@ -72,6 +62,15 @@ class EfficientADNet(nn.Module):
         for parameters in self.te_model.parameters():
             parameters.requires_grad = False
         print('load teacher model from {}'.format(ckpt_path))
+
+    def load_quantile(self):
+        quantile_ckpt = '{}/{}_quantiles_last.pth'.format(self.ckpt_dir,self.category)
+        assert os.path.exists(quantile_ckpt), 'quantile file not found'
+        quantiles  = torch.load(quantile_ckpt)
+        self.qa_st = quantiles['qa_st']
+        self.qb_st = quantiles['qb_st']
+        self.qa_ae = quantiles['qa_ae']
+        self.qb_ae = quantiles['qb_ae']
 
 
     def predict(self, image):
@@ -107,23 +106,12 @@ class EfficientADNet(nn.Module):
 
         combined_map = 0.5*map_st + 0.5*map_ae
         combined_map = F.interpolate(combined_map, size=(self.input_size,self.input_size), mode='bilinear')
-        idx_start    = (self.input_size - self.score_in_mid_size)//2
-        image_score  = torch.max(combined_map[:,:,idx_start:idx_start+self.score_in_mid_size,
-                                              idx_start:idx_start+self.score_in_mid_size])
+        idx_start    = (self.input_size - self.valid_size)//2
+        image_score  = torch.max(combined_map[:,:,idx_start:idx_start+self.valid_size,
+                                              idx_start:idx_start+self.valid_size])
         return combined_map, image_score
 
     # ----------------------------------------------------------------- #
-    def choose_random_aug_image(self,image):
-        aug_index   = random.choice([1,2,3])
-        coefficient = random.uniform(0.8,1.2)
-        if aug_index == 1:
-            img_aug = transforms.functional.adjust_brightness(image,coefficient)
-        elif aug_index == 2:
-            img_aug = transforms.functional.adjust_contrast(image,coefficient)
-        elif aug_index == 3:
-            img_aug = transforms.functional.adjust_saturation(image,coefficient)
-        return img_aug
-
     def loss_st(self,image,imagenet_iterator,teacher:Teacher,student:Student):
         
         if self.teacher_mean is None or self.teacher_std is None:
@@ -150,10 +138,21 @@ class EfficientADNet(nn.Module):
     
     def loss_ae(self,image,teacher:Teacher,student:Student,autoencoder:AutoEncoder):
         
+        def choose_random_aug_image(image):
+            aug_index   = random.choice([1,2,3])
+            coefficient = random.uniform(0.8,1.2)
+            if aug_index == 1:
+                img_aug = transforms.functional.adjust_brightness(image,coefficient)
+            elif aug_index == 2:
+                img_aug = transforms.functional.adjust_contrast(image,coefficient)
+            elif aug_index == 3:
+                img_aug = transforms.functional.adjust_saturation(image,coefficient)
+            return img_aug
+        
         if self.teacher_mean is None or self.teacher_std is None:
             self.load_teacher_mean_std()
         
-        aug_img = self.choose_random_aug_image(image=image)
+        aug_img = choose_random_aug_image(image=image)
         aug_img = aug_img.cuda()
         with torch.no_grad():
             teacher_out = teacher(aug_img)
